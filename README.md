@@ -50,7 +50,7 @@ For general Agent Canvas setup, see the [OpenHands local setup documentation](ht
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/rajshah4/agent-canvas-conversation-search.git
+git clone --branch v0.1.0 https://github.com/rajshah4/agent-canvas-conversation-search.git
 cd agent-canvas-conversation-search
 ```
 
@@ -91,7 +91,7 @@ In Agent Canvas:
 | Field | Value |
 | --- | --- |
 | Source | `github:rajshah4/agent-canvas-conversation-search` |
-| Ref | `main` |
+| Ref | `v0.1.0` |
 | Repository path | `extension` |
 
 4. Install the extension.
