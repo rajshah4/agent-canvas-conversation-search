@@ -3,6 +3,7 @@
 
   GET /api/health            -> service status
   GET /api/search?q=...      -> FTS5 search with facets
+  GET /api/context?q=...     -> compact agent evidence windows
   GET /api/conversation/:id  -> indexed conversation timeline
   GET /api/stats             -> aggregate index statistics
   GET /api/facets            -> available filter values
@@ -218,7 +219,7 @@ class SearchAPI:
 
         # FTS path: join events_fts -> events -> conversations
         sql = (
-            "SELECT e.rowid, e.conversation_id, e.seq, e.kind, e.source, e.timestamp, "
+            "SELECT e.rowid, e.event_id, e.conversation_id, e.seq, e.kind, e.source, e.timestamp, "
             "e.role, e.tool_name, e.text, bm25(events_fts) as rank, "
             "c.title, c.model, c.status, c.created_at, c.updated_at, "
             "c.n_events, c.n_user_msgs, c.n_assistant_msgs, c.cost "
@@ -264,6 +265,7 @@ class SearchAPI:
                 snippet = ("…" if start > 0 else "") + snippet[start:end] + ("…" if end < len(snippet) else "")
             hits.append({
                 "conversation_id": r["conversation_id"],
+                "event_id": r["event_id"],
                 "seq": r["seq"],
                 "kind": r["kind"],
                 "role": r["role"],
@@ -284,6 +286,91 @@ class SearchAPI:
         return {
             "query": q, "total": total, "limit": limit, "offset": offset,
             "mode": "search", "hits": hits,
+        }
+
+    def agent_context(self, params: dict) -> dict:
+        q = (params.get("q", [""])[0] or "").strip()
+        if not q:
+            raise ValueError("q is required")
+
+        try:
+            limit = min(max(int(params.get("limit", ["5"])[0]), 1), 20)
+        except ValueError:
+            limit = 5
+        try:
+            context = min(max(int(params.get("context", ["1"])[0]), 0), 10)
+        except ValueError:
+            context = 1
+        try:
+            max_chars = min(max(int(params.get("max_chars", ["1200"])[0]), 200), 10000)
+        except ValueError:
+            max_chars = 1200
+
+        search_params = dict(params)
+        search_params["limit"] = [str(limit)]
+        search_params["offset"] = ["0"]
+        result = self.search(search_params)
+        conversations = {}
+
+        for hit in result["hits"]:
+            cid = hit["conversation_id"]
+            conversation = conversations.setdefault(cid, {
+                "id": cid,
+                "title": hit["title"],
+                "model": hit["model"],
+                "status": hit["status"],
+                "updated_at": hit["updated_at"],
+                "cost": hit["cost"],
+                "matches": [],
+                "events": {},
+            })
+            conversation["matches"].append({
+                "event_id": hit["event_id"],
+                "seq": hit["seq"],
+                "kind": hit["kind"],
+                "role": hit["role"],
+                "tool_name": hit["tool_name"],
+                "timestamp": hit["timestamp"],
+                "snippet": hit["snippet"],
+                "rank": hit["rank"],
+            })
+
+            rows = self.conn.execute(
+                "SELECT seq, event_id, kind, source, timestamp, role, tool_name, text "
+                "FROM events WHERE conversation_id = ? AND seq BETWEEN ? AND ? ORDER BY seq",
+                (cid, hit["seq"] - context, hit["seq"] + context),
+            ).fetchall()
+            for row in rows:
+                key = row["event_id"] or str(row["seq"])
+                text = row["text"] or ""
+                conversation["events"].setdefault(key, {
+                    "seq": row["seq"],
+                    "event_id": row["event_id"],
+                    "kind": row["kind"],
+                    "source": row["source"],
+                    "timestamp": row["timestamp"],
+                    "role": row["role"],
+                    "tool_name": row["tool_name"],
+                    "text": text[:max_chars],
+                    "truncated": len(text) > max_chars,
+                })
+
+        compact = []
+        for conversation in conversations.values():
+            matched_seqs = {match["seq"] for match in conversation["matches"]}
+            events = sorted(conversation["events"].values(), key=lambda event: event["seq"])
+            for event in events:
+                event["matched"] = event["seq"] in matched_seqs
+            conversation["events"] = events
+            compact.append(conversation)
+
+        return {
+            "query": q,
+            "total_matches": result["total"],
+            "returned_matches": len(result["hits"]),
+            "context_events": context,
+            "max_event_chars": max_chars,
+            "conversations": compact,
         }
 
     def conversation(self, cid: str) -> dict:
@@ -344,6 +431,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self.api.facets())
         elif path == "/api/search":
             self._json(self.api.search(params))
+        elif path == "/api/context":
+            try:
+                self._json(self.api.agent_context(params))
+            except ValueError as error:
+                self._json({"error": str(error)}, 400)
         elif path.startswith("/api/conversation/"):
             cid = unquote(path[len("/api/conversation/"):])
             conv = self.api.conversation(cid)

@@ -134,6 +134,55 @@ localStorage.removeItem("conv-search:api-base");
 location.reload();
 ```
 
+## Give agents access to conversation history
+
+Install the bundled progressive-disclosure skill so Agent Canvas conversations can search history without loading complete traces.
+
+In **Customize → Skills**, add:
+
+| Field | Value |
+| --- | --- |
+| Source | `github:rajshah4/agent-canvas-conversation-search` |
+| Ref | `main` |
+| Repository path | `skills/conversation-history-search` |
+
+Enable **Conversation History Search** and start a new conversation so Canvas includes the newly installed skill. Requests such as “search past conversations for the pagination cursor bug” trigger it. The agent invokes the bundled dependency-free CLI, which queries the local service and returns compact evidence windows.
+
+The CLI can also be used directly:
+
+```bash
+python3 skills/conversation-history-search/scripts/search_history.py health
+python3 skills/conversation-history-search/scripts/search_history.py recent --limit 10
+python3 skills/conversation-history-search/scripts/search_history.py search "pagination cursor" --limit 5
+```
+
+Historical content is treated as untrusted evidence. The skill instructs agents to cite conversation IDs and event sequences, verify stale facts, and never execute instructions found in retrieved history.
+
+## Agent context API
+
+`GET /api/context` performs ranked FTS5 search and returns each match with a small, deduplicated window of neighboring events. This is more token-efficient than requesting `/api/conversation/:id`.
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `q` | required | FTS5 query |
+| `limit` | `5` | Matching events, clamped to 1–20 |
+| `context` | `1` | Neighboring events on each side, clamped to 0–10 |
+| `max_chars` | `1200` | Text per event, clamped to 200–10,000 |
+| `model`, `status` | — | Conversation metadata filters |
+| `role`, `kind`, `tool` | — | Matching event filters |
+| `after`, `before` | — | Conversation `updated_at` bounds |
+
+Example:
+
+```bash
+curl --get http://127.0.0.1:8765/api/context \
+  --data-urlencode 'q="next_page_id"' \
+  --data-urlencode 'limit=3' \
+  --data-urlencode 'context=1'
+```
+
+The response reports total and returned match counts, conversation metadata, matched event sequences, and bounded event text. Overlapping windows in the same conversation are deduplicated.
+
 ## Keep the index current
 
 The service does not yet watch the filesystem. Run an incremental indexing pass after new conversations are created:
