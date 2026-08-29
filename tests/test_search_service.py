@@ -86,6 +86,37 @@ class SearchServiceTest(unittest.TestCase):
         self.assertEqual(result["total"], 1)
         self.assertEqual(result["hits"][0]["conversation_id"], "mid")
 
+    def test_agent_context_returns_bounded_evidence_windows(self):
+        result = self.api.agent_context(parse_qs("q=kubernetes&limit=2&context=1"))
+        self.assertEqual(result["returned_matches"], 2)
+        self.assertEqual({row["id"] for row in result["conversations"]}, {"new", "mid"})
+        newest = next(row for row in result["conversations"] if row["id"] == "new")
+        self.assertEqual([event["seq"] for event in newest["events"]], [1, 2])
+        self.assertTrue(newest["events"][0]["matched"])
+        self.assertEqual(newest["events"][0]["event_id"], "new-1")
+        self.assertEqual(newest["matches"][0]["event_id"], "new-1")
+        self.assertFalse(newest["events"][1]["matched"])
+
+    def test_agent_context_deduplicates_overlapping_windows(self):
+        result = self.api.agent_context(parse_qs("q=deploy&limit=5&context=1"))
+        conversation = result["conversations"][0]
+        self.assertEqual(len(conversation["matches"]), 2)
+        self.assertEqual([event["seq"] for event in conversation["events"]], [1, 2])
+
+    def test_agent_context_requires_text_query(self):
+        with self.assertRaisesRegex(ValueError, "q is required"):
+            self.api.agent_context({})
+
+    def test_agent_context_caps_event_text(self):
+        long_text = "kubernetes " + ("x" * 500)
+        self.api.conn.execute("UPDATE events SET text = ? WHERE event_id = 'new-1'", (long_text,))
+        self.api.conn.commit()
+        result = self.api.agent_context(parse_qs("q=kubernetes&role=user&limit=1&context=0&max_chars=10"))
+        event = result["conversations"][0]["events"][0]
+        self.assertEqual(result["max_event_chars"], 200)
+        self.assertEqual(len(event["text"]), 200)
+        self.assertTrue(event["truncated"])
+
 
 if __name__ == "__main__":
     unittest.main()
