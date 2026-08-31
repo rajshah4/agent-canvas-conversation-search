@@ -509,6 +509,19 @@ const STYLE = `
   flex-wrap: wrap;
 }
 
+.conv-search__trace-origin {
+  color: var(--cs-accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--cs-accent) 45%, transparent);
+  text-underline-offset: .2em;
+}
+
+.conv-search__trace-origin:hover,
+.conv-search__trace-origin:focus-visible {
+  color: var(--cs-text);
+  text-decoration-color: currentColor;
+}
+
 .conv-search__trace-main {
   min-width: 0;
   overflow-y: auto;
@@ -1445,7 +1458,11 @@ function mountTracePage(host, { container, path, navigate }) {
     const meta = el("div", "conv-search__trace-meta");
     if (state.convMeta?.execution_status || state.convMeta?.status)
       meta.append(el("span", null, state.convMeta?.execution_status || state.convMeta?.status));
-    meta.append(el("span", null, convId));
+    const originLink = el("a", "conv-search__trace-origin", convId);
+    originLink.href = `/conversations/${encodeURIComponent(convId)}`;
+    originLink.title = "Open original conversation";
+    originLink.setAttribute("aria-label", `Open original conversation ${convId}`);
+    meta.append(originLink);
     if (state.convMeta?.current_model_name || state.convMeta?.current_model_id)
       meta.append(el("span", null, state.convMeta?.current_model_name || state.convMeta?.current_model_id));
     header.append(meta);
