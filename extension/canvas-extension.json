@@ -2,7 +2,7 @@
   "schema_version": 1,
   "name": "conversation-search",
   "display_name": "Conversation Search",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Full-text search across your Agent Canvas conversation history — messages, tool calls, file edits, commands, and observations.",
   "entrypoint": "extension.js",
   "contributes": {
